@@ -22,6 +22,7 @@ export interface StepInfo {
   description: string;
   technicalDetails: string[];
   analogy: string;
+  whyItMatters: string;
   packetName: string;
   direction: 'right' | 'left' | 'both' | 'internal';
 }

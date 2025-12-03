@@ -15,7 +15,8 @@ import {
   MessageSquare,
   Globe,
   CreditCard,
-  BookOpen
+  BookOpen,
+  Info
 } from 'lucide-react';
 
 export {
@@ -35,5 +36,6 @@ export {
   MessageSquare,
   Globe,
   CreditCard,
-  BookOpen
+  BookOpen,
+  Info
 };

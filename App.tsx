@@ -13,7 +13,8 @@ import {
   CreditCard,
   Globe,
   Lock,
-  BookOpen
+  BookOpen,
+  Info
 } from './components/Icons';
 import { explainConcept, getStepDeepDive } from './services/geminiService';
 import ReactMarkdown from 'react-markdown';
@@ -32,88 +33,96 @@ const STEPS_SEQUENCE = [
 const STEP_DETAILS: Record<TlsStep, StepInfo> = {
   [TlsStep.IDLE]: {
     title: '1. Initial State (TCP Connected)',
-    description: 'The underlying TCP connection (Three-way handshake) has been established. The client (browser) is now ready to request a secure session with classicdba.com. No encrypted data has been exchanged yet.',
+    description: 'Before TLS can begin, a TCP connection (Layer 4) must be established via the "Three-way Handshake" (SYN, SYN-ACK, ACK). The client and server can talk, but the line is completely insecure. Anyone with a wiretap can read every byte sent.',
     technicalDetails: [
-      'Layer 4 (Transport) is established via SYN, SYN-ACK, ACK.',
-      'We are now beginning Layer 5/6 (Session/Presentation) logic.',
-      'Latency: 0-RTT options exist in TLS 1.3, but we are simulating a standard 1-RTT handshake.'
+      'Transport Layer: TCP connection established on port 443.',
+      'Latency: TLS 1.3 builds on top of this, adding 1-RTT (Round Trip Time) to the total setup time.',
+      'State: Unencrypted. No keys exist yet.'
     ],
-    analogy: 'Imagine you have dialed a phone number and the other person has picked up. The line is open, but you haven\'t started speaking your secret code language yet.',
+    analogy: 'You have successfully dialed a phone number and someone picked up. The line is open, but you are effectively shouting in a crowded room. You haven\'t started speaking your secret code language yet.',
+    whyItMatters: 'TLS lives at Layer 5/6 (Session/Presentation). It relies on TCP to ensure packets actually arrive, but TCP does not provide privacy or identity. Without TLS, the internet would just be "text files over a wire" visible to everyone.',
     packetName: '',
     direction: 'internal'
   },
   [TlsStep.CLIENT_HELLO]: {
     title: '2. Client Hello',
-    description: 'The browser initiates the TLS handshake. Crucially, in TLS 1.3, it "guesses" the key exchange method to save a round-trip, sending its key share immediately.',
+    description: 'The browser initiates the secure handshake. In TLS 1.3, this step is aggressively optimized. The client "guesses" the key exchange method (usually ECDHE) and sends its public key share immediately, saving an entire round-trip compared to TLS 1.2.',
     technicalDetails: [
-      'Protocol Version: TLS 1.3 (0x0304)',
-      'Random: 32 bytes of random data (prevents replay attacks).',
-      'Cipher Suites: List of supported algorithms (e.g., TLS_AES_128_GCM_SHA256).',
-      'Key Share Extension: The client generates an ephemeral ECDHE public key pair and sends the public part immediately.'
+      'Protocol Version: TLS 1.3 (0x0304).',
+      'Random: 32 bytes of high-entropy random data to prevent replay attacks.',
+      'Cipher Suites: An ordered list of supported algorithms (e.g., TLS_AES_128_GCM_SHA256).',
+      'Key Share Extension: The critical TLS 1.3 upgrade. The client generates an ephemeral key pair (ECDHE) and sends the public part now.'
     ],
-    analogy: 'The client shouts: "I want to talk securely! Here are the languages I speak (Cipher Suites) and here is half of a puzzle piece (Key Share) to start our secret key."',
+    analogy: 'The client shouts: "I want to talk securely! I speak these languages (Cipher Suites). I am betting we will use this specific method, so here is my half of the puzzle piece (Key Share) right now to save time."',
+    whyItMatters: 'This "optimistic" key share is what makes TLS 1.3 faster. In older versions, the client would just say "Hello" and wait for the server to choose a method before creating keys. TLS 1.3 assumes a modern default.',
     packetName: 'ClientHello + KeyShare',
     direction: 'right'
   },
   [TlsStep.SERVER_HELLO]: {
     title: '3. Server Hello & Certificate',
-    description: 'The server responds. It selects the cipher suite, sends its own key share, and provides its Digital Certificate to prove "classicdba.com" is who it says it is.',
+    description: 'The server responds. It selects the cryptographic parameters, completes the key exchange, and sends its Digital Certificate. This certificate is the "ID Card" of the internet, proving the server really is "classicdba.com".',
     technicalDetails: [
-      'ServerHello: Confirms TLS 1.3 and the selected Cipher Suite.',
+      'ServerHello: Confirms the selected Cipher Suite and Protocol Version.',
       'Key Share: Server sends its matching ECDHE public key.',
-      'Certificate: X.509 Certificate chain signed by a CA (Certificate Authority).',
-      'CertificateVerify: Digital signature over the handshake transcript using the Certificate\'s private key.'
+      'Certificate: The X.509 Certificate chain (Leaf -> Intermediate -> Root CA).',
+      'CertificateVerify: A digital signature using the Certificate\'s private key to prove ownership.',
+      'Encrypted Extensions: Other handshake parameters are now encrypted immediately.'
     ],
-    analogy: 'The server replies: "Let\'s use this specific secret language. Here is my half of the puzzle piece. Also, here is my ID card (Certificate) stamped by the government (CA) to prove I am real."',
+    analogy: 'The server replies: "Let\'s use the method you guessed. Here is my half of the puzzle piece. Also, here is my ID card (Certificate) stamped by a trusted government (CA), and a signature to prove I own this ID."',
+    whyItMatters: 'Authentication is critical. Without the Certificate, you might be setting up a perfectly encrypted connection with a hacker (Man-in-the-Middle). The Certificate ensures you are talking to the real owner.',
     packetName: 'SvrHello + Cert + Key',
     direction: 'left'
   },
   [TlsStep.KEY_DERIVATION]: {
     title: '4. Key Derivation',
-    description: 'Mathematics takes over. Both parties now have enough information (their private key + the other\'s public key share) to calculate the exact same "Master Secret" independently.',
+    description: 'Pure Mathematics. Both parties now have the other\'s public key share and their own private key. Using Elliptic Curve Diffie-Hellman (ECDH), they independently calculate the exact same "Shared Secret" without ever transmitting it.',
     technicalDetails: [
       'Algorithm: ECDHE (Elliptic Curve Diffie-Hellman Ephemeral).',
-      'Property: Shared Secret = (ClientPriv * ServerPub) = (ServerPriv * ClientPub).',
-      'Result: Handshake Keys (for finishing the handshake) and Application Data Keys (for the actual traffic) are generated.',
-      'Forward Secrecy: New keys are generated for every session.'
+      'Math: Shared Secret = (ClientPriv * ServerPub) = (ServerPriv * ClientPub).',
+      'HKDF: This shared secret is run through a Key Derivation Function to split it into specific keys: Handshake Keys, Application Data Keys, and Resumption Keys.',
+      'Forward Secrecy: Because the keys are ephemeral (temporary), recording this traffic now won\'t help a hacker decrypt it later, even if they steal the server\'s main private key.'
     ],
-    analogy: 'Both sides mix their own secret color with the public color they received. The result is a specific shade of paint that only they know, without ever sending the mixed paint over the wire.',
+    analogy: 'Both sides mix their own secret color (private key) with the public color they received (public key). The laws of math ensure they both end up with the exact same shade of "Master Paint", even though that final color was never sent over the air.',
+    whyItMatters: 'This allows two strangers who have never met to agree on a secret password while everyone is listening, yet no one else can figure out what the password is.',
     packetName: 'Computing Keys...',
     direction: 'internal'
   },
   [TlsStep.SERVER_FINISHED]: {
     title: '5. Server Finished',
-    description: 'The server sends a "Finished" message. This is the first encrypted message of the session. It contains a hash of the entire conversation so far to ensure no one tampered with the setup.',
+    description: 'The server sends a "Finished" message. This is the first fully encrypted packet of the session. It contains an HMAC (Hash) of the entire conversation so far to ensure integrity.',
     technicalDetails: [
       'Encryption: Uses the newly derived Handshake Traffic Key.',
-      'Content: HMAC (Hash-based Message Authentication Code) of the handshake transcript.',
-      'Purpose: Verifies integrity. If a middleman changed the "Client Hello" (e.g., trying to downgrade security), this hash check will fail.'
+      'Integrity Check: HMAC (Hash-based Message Authentication Code) over the Transcript Hash.',
+      'Protection: Prevents "Downgrade Attacks" where a hacker might have tried to modify the "Client Hello" to force a weaker encryption method. If the hash doesn\'t match, the server knows the Hello was tampered with.'
     ],
-    analogy: 'The server says (in the new secret language): "Here is a summary of everything we just said. If this summary matches your notes, we are safe."',
+    analogy: 'The server says (in the new secret language): "Here is a summary of everything we just said. If this summary matches your notes, we know no one changed our messages while we were setting this up."',
+    whyItMatters: 'This step confirms that the "Negotiation" phase wasn\'t tampered with. It locks in the security parameters.',
     packetName: 'Finished (Encrypted)',
     direction: 'left'
   },
   [TlsStep.CLIENT_FINISHED]: {
     title: '6. Client Finished',
-    description: 'The client verifies the server\'s ID and hash. If everything looks good, it sends its own encrypted "Finished" message. The Handshake is complete.',
+    description: 'The client verifies the server\'s ID and hash. If valid, the browser displays the Lock Icon. The client sends its own encrypted "Finished" message. The handshake is complete.',
     technicalDetails: [
-      'Validation: Client checks the Certificate signature against its store of trusted CAs.',
-      'State Switch: Both parties discard the Handshake Keys and switch to Application Data Keys.',
-      'Ready: The secure tunnel is established.'
+      'Validation: Client checks the Certificate signature against its trusted Root Store (e.g., DigiCert, Let\'s Encrypt).',
+      'Context Switch: Both parties discard the Handshake Keys and switch to the final Application Data Keys.',
+      '0-RTT ready: The client may store a "session ticket" to make future connections faster.'
     ],
-    analogy: 'The client checks the ID card, verifies the summary, and replies (encrypted): "Everything looks perfect. I am ready to send real data now."',
+    analogy: 'The client checks the ID card, verifies the summary, and replies (encrypted): "Your ID is valid and the summary matches. I am ready to send real data now."',
+    whyItMatters: 'This is the moment the browser URL bar turns green (or shows the lock). The secure tunnel is officially open.',
     packetName: 'Finished (Encrypted)',
     direction: 'right'
   },
   [TlsStep.SECURE_TUNNEL]: {
     title: '7. Secure Data Tunnel',
-    description: 'The application layer (HTTP) data can now flow. To any outside observer, this traffic looks like random noise. The lock icon appears in the browser.',
+    description: 'The heavy lifting of asymmetric cryptography (handshake) is done. Now, efficient symmetric encryption (AES-GCM or ChaCha20) is used to stream data securely.',
     technicalDetails: [
-      'Symmetric Encryption: AES-GCM or ChaCha20-Poly1305 is used for speed.',
-      'Throughput: Symmetric encryption is much faster than the asymmetric math used in the handshake.',
-      'Renegotiation: Keys can be updated periodically during the session for added security.'
+      'Symmetric Encryption: Used for speed. Algorithms like AES-GCM are hardware-accelerated on most modern CPUs.',
+      'AEAD: Authenticated Encryption with Associated Data. Ensures confidentiality (reading) and authenticity (tampering).',
+      'Key Rotation: TLS 1.3 can automatically rotate keys periodically during a long download to prevent statistical analysis attacks.'
     ],
-    analogy: 'An armored truck (the secure tunnel) is now driving back and forth carrying valuables (data). Even if thieves stop the truck, they cannot open the lock.',
+    analogy: 'An armored truck (the secure tunnel) is now driving back and forth carrying valuables (data). Even if thieves stop the truck, they cannot open the lock, and they can\'t even tell if the truck is carrying gold or empty boxes (padding).',
+    whyItMatters: 'This is the state used for 99% of the connection duration. It protects your credit card numbers, passwords, and personal emails from prying eyes.',
     packetName: 'HTTP Data (AES-256)',
     direction: 'both'
   }
@@ -173,7 +182,7 @@ const App: React.FC = () => {
     if (isPlaying) {
       interval = setInterval(() => {
         handleNext();
-      }, 3500); // Slightly longer for detailed reading
+      }, 5000); // 5 seconds per step for better readability
     }
     return () => clearInterval(interval);
   }, [isPlaying, currentStepIndex]);
@@ -208,34 +217,34 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background text-slate-100 font-sans selection:bg-primary selection:text-slate-900 pb-20">
+    <div className="min-h-screen bg-background text-slate-100 font-sans selection:bg-primary selection:text-slate-900 pb-20 w-full overflow-x-hidden">
       
       {/* Navbar */}
-      <header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-50">
-        <div className="w-full px-8 h-16 flex items-center justify-between">
+      <header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-50 w-full">
+        <div className="w-full px-6 md:px-10 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
              <div className="bg-primary/10 p-2 rounded-lg">
                 <ShieldCheck className="text-primary" size={24} />
              </div>
-             <h1 className="text-xl font-bold tracking-tight text-white">TLS 1.3 <span className="text-slate-500 font-normal">Masterclass</span></h1>
+             <h1 className="text-xl font-bold tracking-tight text-white hidden sm:block">TLS 1.3 <span className="text-slate-500 font-normal">Masterclass</span></h1>
           </div>
-          <div className="flex items-center gap-6 text-sm font-medium text-slate-400">
-             <div className="hidden md:flex items-center gap-6">
-               <span className="flex items-center gap-2 hover:text-primary cursor-pointer transition-colors"><Globe size={16}/> Protocol RFC 8446</span>
+          <div className="flex items-center gap-4 sm:gap-6 text-sm font-medium text-slate-400">
+             <div className="hidden lg:flex items-center gap-6">
+               <a href="#" className="flex items-center gap-2 hover:text-primary cursor-pointer transition-colors"><Globe size={16}/> Protocol RFC 8446</a>
                <span className="flex items-center gap-2 hover:text-primary cursor-pointer transition-colors"><CreditCard size={16}/> PCI-DSS Compliance</span>
              </div>
              <div className="bg-slate-800 px-3 py-1 rounded border border-slate-700 text-xs font-mono text-primary shadow-[0_0_10px_rgba(56,189,248,0.1)]">
-               SIMULATION MODE
+               SIMULATION ACTIVE
              </div>
           </div>
         </div>
       </header>
 
       {/* Main Full-Width Container */}
-      <main className="w-full px-6 py-8 grid grid-cols-1 xl:grid-cols-12 gap-8">
+      <main className="w-full px-4 md:px-8 py-8 grid grid-cols-1 xl:grid-cols-12 gap-8 max-w-[2400px] mx-auto">
         
         {/* Left Column: Controls & Educational Info */}
-        <div className="xl:col-span-4 lg:col-span-5 space-y-6 flex flex-col">
+        <div className="xl:col-span-4 lg:col-span-5 space-y-6 flex flex-col order-2 xl:order-1">
           
           {/* Controls Card */}
           <div className="bg-surface border border-slate-700 rounded-xl p-6 shadow-xl">
@@ -255,7 +264,7 @@ const App: React.FC = () => {
                   <ArrowLeft size={20} />
                 </button>
                 <button onClick={togglePlay} 
-                  className="col-span-2 bg-primary hover:bg-sky-400 text-slate-900 font-bold py-3 rounded-lg transition-colors flex items-center justify-center gap-2">
+                  className="col-span-2 bg-primary hover:bg-sky-400 text-slate-900 font-bold py-3 rounded-lg transition-colors flex items-center justify-center gap-2 shadow-lg shadow-primary/10">
                    {isPlaying ? (
                      <><span>PAUSE</span></>
                    ) : (
@@ -274,31 +283,44 @@ const App: React.FC = () => {
           </div>
 
           {/* Detailed Info Card */}
-          <div className="bg-surface border border-slate-700 rounded-xl p-8 relative overflow-hidden flex-1 shadow-xl">
-            <div className="absolute -top-6 -right-6 text-slate-800/50">
-              <Lock size={200} />
+          <div className="bg-surface border border-slate-700 rounded-xl p-6 md:p-8 relative overflow-hidden flex-1 shadow-xl flex flex-col">
+            <div className="absolute -top-6 -right-6 text-slate-800/50 pointer-events-none">
+              <Lock size={240} />
             </div>
             
-            <div className="relative z-10">
-              <h2 className="text-3xl font-bold text-white mb-4">{stepInfo.title}</h2>
-              <p className="text-slate-300 leading-relaxed text-lg mb-8">{stepInfo.description}</p>
+            <div className="relative z-10 space-y-6">
+              <div>
+                <h2 className="text-3xl font-bold text-white mb-4 leading-tight">{stepInfo.title}</h2>
+                <p className="text-slate-300 leading-relaxed text-lg">{stepInfo.description}</p>
+              </div>
               
-              <div className="space-y-6">
-                <div className="bg-slate-900/80 rounded-lg p-5 border border-slate-800 backdrop-blur-sm">
-                  <div className="flex items-center gap-2 mb-3">
-                    <BookOpen size={16} className="text-secondary" />
-                    <h4 className="text-xs font-bold text-secondary uppercase tracking-wider">Analogy</h4>
+              <div className="space-y-4">
+                {/* Analogy Section */}
+                <div className="bg-indigo-950/40 rounded-lg p-5 border border-indigo-500/20 backdrop-blur-sm">
+                  <div className="flex items-center gap-2 mb-2">
+                    <BookOpen size={16} className="text-indigo-400" />
+                    <h4 className="text-xs font-bold text-indigo-400 uppercase tracking-wider">Real World Analogy</h4>
                   </div>
-                  <p className="text-slate-300 italic">"{stepInfo.analogy}"</p>
+                  <p className="text-indigo-100/90 italic text-sm leading-relaxed">"{stepInfo.analogy}"</p>
                 </div>
 
+                 {/* Why It Matters Section */}
+                <div className="bg-emerald-950/40 rounded-lg p-5 border border-emerald-500/20 backdrop-blur-sm">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Info size={16} className="text-emerald-400" />
+                    <h4 className="text-xs font-bold text-emerald-400 uppercase tracking-wider">Why It Matters</h4>
+                  </div>
+                  <p className="text-emerald-100/90 text-sm leading-relaxed">{stepInfo.whyItMatters}</p>
+                </div>
+
+                {/* Technical Breakdown */}
                 <div className="bg-slate-900/80 rounded-lg p-5 border border-slate-800 backdrop-blur-sm">
                    <h4 className="text-xs font-bold text-primary uppercase mb-3 tracking-wider">Technical Breakdown</h4>
-                   <ul className="space-y-2">
+                   <ul className="space-y-3">
                      {stepInfo.technicalDetails.map((detail, idx) => (
-                       <li key={idx} className="text-sm text-slate-400 font-mono flex items-start gap-2">
-                         <span className="text-primary mt-1">›</span>
-                         <span>{detail}</span>
+                       <li key={idx} className="text-sm text-slate-400 font-mono flex items-start gap-3">
+                         <span className="text-primary mt-1 text-lg leading-none">›</span>
+                         <span className="leading-snug">{detail}</span>
                        </li>
                      ))}
                    </ul>
@@ -310,11 +332,11 @@ const App: React.FC = () => {
         </div>
 
         {/* Right Column: Wide Visualization */}
-        <div className="xl:col-span-8 lg:col-span-7 flex flex-col gap-6">
+        <div className="xl:col-span-8 lg:col-span-7 flex flex-col gap-6 order-1 xl:order-2">
            <SimulationStage currentState={simulationState} />
 
            {/* AI & Logs Section */}
-           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 h-64">
+           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 h-[400px] xl:h-[320px]">
               
               {/* AI Insights */}
               <div className="bg-gradient-to-br from-indigo-950/50 to-purple-950/50 border border-indigo-500/20 rounded-xl p-6 flex flex-col shadow-lg">
