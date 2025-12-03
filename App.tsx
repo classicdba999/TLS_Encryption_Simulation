@@ -1,5 +1,5 @@
+
 import React, { useState, useEffect, useRef } from 'react';
-import { createRoot } from 'react-dom/client';
 import SimulationStage from './components/SimulationStage';
 import { Watermark } from './components/Watermark';
 import { TlsStep, SimulationState, StepInfo, ChatMessage } from './types';
@@ -14,7 +14,8 @@ import {
   Globe,
   Lock,
   BookOpen,
-  Info
+  Info,
+  Pause
 } from './components/Icons';
 import { explainConcept, getStepDeepDive } from './services/geminiService';
 import ReactMarkdown from 'react-markdown';
@@ -33,96 +34,91 @@ const STEPS_SEQUENCE = [
 const STEP_DETAILS: Record<TlsStep, StepInfo> = {
   [TlsStep.IDLE]: {
     title: '1. Initial State (TCP Connected)',
-    description: 'Before TLS can begin, a TCP connection (Layer 4) must be established via the "Three-way Handshake" (SYN, SYN-ACK, ACK). The client and server can talk, but the line is completely insecure. Anyone with a wiretap can read every byte sent.',
+    description: 'Before TLS can begin, a TCP connection (Layer 4) must be established via the "Three-way Handshake". The line is open but insecure.',
     technicalDetails: [
-      'Transport Layer: TCP connection established on port 443.',
-      'Latency: TLS 1.3 builds on top of this, adding 1-RTT (Round Trip Time) to the total setup time.',
+      'Transport: TCP connection on port 443.',
       'State: Unencrypted. No keys exist yet.'
     ],
-    analogy: 'You have successfully dialed a phone number and someone picked up. The line is open, but you are effectively shouting in a crowded room. You haven\'t started speaking your secret code language yet.',
-    whyItMatters: 'TLS lives at Layer 5/6 (Session/Presentation). It relies on TCP to ensure packets actually arrive, but TCP does not provide privacy or identity. Without TLS, the internet would just be "text files over a wire" visible to everyone.',
+    analogy: 'You have dialed a phone number. The line is open, but anyone can tap the wire and listen.',
+    whyItMatters: 'TLS relies on TCP for reliability but adds the privacy layer.',
     packetName: '',
     direction: 'internal'
   },
   [TlsStep.CLIENT_HELLO]: {
     title: '2. Client Hello',
-    description: 'The browser initiates the secure handshake. In TLS 1.3, this step is aggressively optimized. The client "guesses" the key exchange method (usually ECDHE) and sends its public key share immediately, saving an entire round-trip compared to TLS 1.2.',
+    description: 'The browser initiates the handshake, "guessing" the key exchange method (ECDHE) and sending its public key share immediately.',
     technicalDetails: [
-      'Protocol Version: TLS 1.3 (0x0304).',
-      'Random: 32 bytes of high-entropy random data to prevent replay attacks.',
-      'Cipher Suites: An ordered list of supported algorithms (e.g., TLS_AES_128_GCM_SHA256).',
-      'Key Share Extension: The critical TLS 1.3 upgrade. The client generates an ephemeral key pair (ECDHE) and sends the public part now.'
+      'Protocol: TLS 1.3 (0x0304).',
+      'Random: 32 bytes for replay protection.',
+      'Key Share: Client\'s ephemeral public key.'
     ],
-    analogy: 'The client shouts: "I want to talk securely! I speak these languages (Cipher Suites). I am betting we will use this specific method, so here is my half of the puzzle piece (Key Share) right now to save time."',
-    whyItMatters: 'This "optimistic" key share is what makes TLS 1.3 faster. In older versions, the client would just say "Hello" and wait for the server to choose a method before creating keys. TLS 1.3 assumes a modern default.',
+    analogy: 'Client shouts: "I want to talk securely! Here is my half of the secret key puzzle immediately to save time."',
+    whyItMatters: 'This "optimistic" key share saves one full round-trip compared to TLS 1.2.',
     packetName: 'ClientHello + KeyShare',
     direction: 'right'
   },
   [TlsStep.SERVER_HELLO]: {
     title: '3. Server Hello & Certificate',
-    description: 'The server responds. It selects the cryptographic parameters, completes the key exchange, and sends its Digital Certificate. This certificate is the "ID Card" of the internet, proving the server really is "classicdba.com".',
+    description: 'The server accepts the key exchange method, sends its own public key share, and provides its Digital Certificate.',
     technicalDetails: [
-      'ServerHello: Confirms the selected Cipher Suite and Protocol Version.',
-      'Key Share: Server sends its matching ECDHE public key.',
-      'Certificate: The X.509 Certificate chain (Leaf -> Intermediate -> Root CA).',
-      'CertificateVerify: A digital signature using the Certificate\'s private key to prove ownership.',
-      'Encrypted Extensions: Other handshake parameters are now encrypted immediately.'
+      'ServerHello: Confirms Cipher Suite.',
+      'Certificate: X.509 Chain (Identity).',
+      'Verify: Digital signature proving ownership.'
     ],
-    analogy: 'The server replies: "Let\'s use the method you guessed. Here is my half of the puzzle piece. Also, here is my ID card (Certificate) stamped by a trusted government (CA), and a signature to prove I own this ID."',
-    whyItMatters: 'Authentication is critical. Without the Certificate, you might be setting up a perfectly encrypted connection with a hacker (Man-in-the-Middle). The Certificate ensures you are talking to the real owner.',
+    analogy: 'Server replies: "Accepted. Here is my puzzle half and my ID card stamped by a trusted authority."',
+    whyItMatters: 'Ensures you are talking to the real website, not an imposter.',
     packetName: 'SvrHello + Cert + Key',
     direction: 'left'
   },
   [TlsStep.KEY_DERIVATION]: {
     title: '4. Key Derivation',
-    description: 'Pure Mathematics. Both parties now have the other\'s public key share and their own private key. Using Elliptic Curve Diffie-Hellman (ECDH), they independently calculate the exact same "Shared Secret" without ever transmitting it.',
+    description: 'Both parties use Math (ECDHE) to calculate the same "Shared Secret" without ever transmitting it over the wire.',
     technicalDetails: [
-      'Algorithm: ECDHE (Elliptic Curve Diffie-Hellman Ephemeral).',
-      'Math: Shared Secret = (ClientPriv * ServerPub) = (ServerPriv * ClientPub).',
-      'HKDF: This shared secret is run through a Key Derivation Function to split it into specific keys: Handshake Keys, Application Data Keys, and Resumption Keys.',
-      'Forward Secrecy: Because the keys are ephemeral (temporary), recording this traffic now won\'t help a hacker decrypt it later, even if they steal the server\'s main private key.'
+      'Algo: ECDHE (Elliptic Curve Diffie-Hellman).',
+      'Property: Forward Secrecy.',
+      'Result: Handshake & App Keys derived.'
     ],
-    analogy: 'Both sides mix their own secret color (private key) with the public color they received (public key). The laws of math ensure they both end up with the exact same shade of "Master Paint", even though that final color was never sent over the air.',
-    whyItMatters: 'This allows two strangers who have never met to agree on a secret password while everyone is listening, yet no one else can figure out what the password is.',
+    analogy: 'Both mix their private color with the public color to get the same secret color that no one else can see.',
+    whyItMatters: 'Even if the server is hacked later, past conversations remain secure (Forward Secrecy).',
     packetName: 'Computing Keys...',
     direction: 'internal'
   },
   [TlsStep.SERVER_FINISHED]: {
     title: '5. Server Finished',
-    description: 'The server sends a "Finished" message. This is the first fully encrypted packet of the session. It contains an HMAC (Hash) of the entire conversation so far to ensure integrity.',
+    description: 'The server sends an encrypted HMAC of the entire conversation transcript to verify integrity.',
     technicalDetails: [
-      'Encryption: Uses the newly derived Handshake Traffic Key.',
-      'Integrity Check: HMAC (Hash-based Message Authentication Code) over the Transcript Hash.',
-      'Protection: Prevents "Downgrade Attacks" where a hacker might have tried to modify the "Client Hello" to force a weaker encryption method. If the hash doesn\'t match, the server knows the Hello was tampered with.'
+      'Encryption: Handshake Key.',
+      'Integrity: HMAC of Transcript.',
+      'Defense: Prevents Downgrade Attacks.'
     ],
-    analogy: 'The server says (in the new secret language): "Here is a summary of everything we just said. If this summary matches your notes, we know no one changed our messages while we were setting this up."',
-    whyItMatters: 'This step confirms that the "Negotiation" phase wasn\'t tampered with. It locks in the security parameters.',
+    analogy: 'Server: "Here is a summary of our chat. If it matches your notes, nobody tampered with the setup."',
+    whyItMatters: 'Locks in the security parameters and confirms no tampering occurred.',
     packetName: 'Finished (Encrypted)',
     direction: 'left'
   },
   [TlsStep.CLIENT_FINISHED]: {
     title: '6. Client Finished',
-    description: 'The client verifies the server\'s ID and hash. If valid, the browser displays the Lock Icon. The client sends its own encrypted "Finished" message. The handshake is complete.',
+    description: 'The client verifies the certificate and handshake hash, then sends its own finished message. The Secure Tunnel is open.',
     technicalDetails: [
-      'Validation: Client checks the Certificate signature against its trusted Root Store (e.g., DigiCert, Let\'s Encrypt).',
-      'Context Switch: Both parties discard the Handshake Keys and switch to the final Application Data Keys.',
-      '0-RTT ready: The client may store a "session ticket" to make future connections faster.'
+      'Validation: Check CA signature.',
+      'State: Switch to Application Keys.',
+      'Ready: HTTP data can now flow.'
     ],
-    analogy: 'The client checks the ID card, verifies the summary, and replies (encrypted): "Your ID is valid and the summary matches. I am ready to send real data now."',
-    whyItMatters: 'This is the moment the browser URL bar turns green (or shows the lock). The secure tunnel is officially open.',
+    analogy: 'Client: "ID verified. Summary matches. I am ready to send private data."',
+    whyItMatters: 'The lock icon appears. The connection is fully authenticated and encrypted.',
     packetName: 'Finished (Encrypted)',
     direction: 'right'
   },
   [TlsStep.SECURE_TUNNEL]: {
     title: '7. Secure Data Tunnel',
-    description: 'The heavy lifting of asymmetric cryptography (handshake) is done. Now, efficient symmetric encryption (AES-GCM or ChaCha20) is used to stream data securely.',
+    description: 'Symmetric encryption (AES-GCM) is now used to stream data at high speed.',
     technicalDetails: [
-      'Symmetric Encryption: Used for speed. Algorithms like AES-GCM are hardware-accelerated on most modern CPUs.',
-      'AEAD: Authenticated Encryption with Associated Data. Ensures confidentiality (reading) and authenticity (tampering).',
-      'Key Rotation: TLS 1.3 can automatically rotate keys periodically during a long download to prevent statistical analysis attacks.'
+      'Cipher: AES-256-GCM or ChaCha20.',
+      'Performance: Hardware accelerated.',
+      'Security: Authenticated Encryption (AEAD).'
     ],
-    analogy: 'An armored truck (the secure tunnel) is now driving back and forth carrying valuables (data). Even if thieves stop the truck, they cannot open the lock, and they can\'t even tell if the truck is carrying gold or empty boxes (padding).',
-    whyItMatters: 'This is the state used for 99% of the connection duration. It protects your credit card numbers, passwords, and personal emails from prying eyes.',
+    analogy: 'An armored truck driving back and forth. Thieves can stop it, but cannot open it.',
+    whyItMatters: 'Protects your passwords, credit cards, and personal data.',
     packetName: 'HTTP Data (AES-256)',
     direction: 'both'
   }
@@ -136,11 +132,11 @@ const App: React.FC = () => {
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [aiTip, setAiTip] = useState<string>('');
+  const logsEndRef = useRef<HTMLDivElement>(null);
   
   const currentStep = STEPS_SEQUENCE[currentStepIndex];
   const stepInfo = STEP_DETAILS[currentStep];
 
-  // Derive state for the visualization
   const simulationState: SimulationState = {
     step: currentStep,
     keysExchanged: currentStepIndex >= 3,
@@ -177,29 +173,33 @@ const App: React.FC = () => {
     }
   };
 
+  // Increased interval to 6000ms to allow for slower animation (5s) to complete
   useEffect(() => {
     let interval: any;
     if (isPlaying) {
       interval = setInterval(() => {
         handleNext();
-      }, 5000); // 5 seconds per step for better readability
+      }, 6000); 
     }
     return () => clearInterval(interval);
   }, [isPlaying, currentStepIndex]);
 
-  // AI Deep Dive when step changes
   useEffect(() => {
     const fetchQuickTip = async () => {
-      setAiTip('Analyzing protocol step...');
+      setAiTip('Analyzing...');
       const tip = await getStepDeepDive(STEP_DETAILS[currentStep].title);
       setAiTip(tip);
     };
     if (currentStep !== TlsStep.IDLE) {
       fetchQuickTip();
     } else {
-      setAiTip('Click "Start" or "Play" to begin the TLS 1.3 handshake analysis.');
+      setAiTip('Ready to analyze handshake.');
     }
   }, [currentStep]);
+
+  useEffect(() => {
+    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [currentStepIndex]);
 
   const handleChatSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -217,109 +217,115 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background text-slate-100 font-sans selection:bg-primary selection:text-slate-900 pb-20 w-full overflow-x-hidden">
+    <div className="min-h-screen bg-background text-slate-100 font-sans selection:bg-primary selection:text-slate-900 w-full overflow-hidden flex flex-col">
       
       {/* Navbar */}
-      <header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-50 w-full">
-        <div className="w-full px-6 md:px-10 h-16 flex items-center justify-between">
+      <header className="border-b border-slate-800 bg-slate-900/90 backdrop-blur sticky top-0 z-50 w-full h-14 flex-none" role="banner">
+        <div className="w-full px-4 md:px-8 h-full flex items-center justify-between">
           <div className="flex items-center gap-3">
-             <div className="bg-primary/10 p-2 rounded-lg">
-                <ShieldCheck className="text-primary" size={24} />
+             <div className="bg-primary/10 p-1.5 rounded-lg" aria-hidden="true">
+                <ShieldCheck className="text-primary" size={20} />
              </div>
-             <h1 className="text-xl font-bold tracking-tight text-white hidden sm:block">TLS 1.3 <span className="text-slate-500 font-normal">Masterclass</span></h1>
+             <h1 className="text-lg font-bold tracking-tight text-white hidden sm:block">TLS 1.3 <span className="text-slate-400 font-normal">Masterclass</span></h1>
           </div>
-          <div className="flex items-center gap-4 sm:gap-6 text-sm font-medium text-slate-400">
-             <div className="hidden lg:flex items-center gap-6">
-               <a href="#" className="flex items-center gap-2 hover:text-primary cursor-pointer transition-colors"><Globe size={16}/> Protocol RFC 8446</a>
-               <span className="flex items-center gap-2 hover:text-primary cursor-pointer transition-colors"><CreditCard size={16}/> PCI-DSS Compliance</span>
+          <nav className="flex items-center gap-4 text-xs font-medium text-slate-300">
+             <div className="hidden lg:flex items-center gap-4">
+               <a href="#" className="flex items-center gap-1.5 hover:text-primary transition-colors focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none rounded px-1"><Globe size={14}/> RFC 8446</a>
+               <span className="flex items-center gap-1.5 hover:text-primary transition-colors cursor-help" title="Payment Card Industry Data Security Standard"><CreditCard size={14}/> PCI-DSS</span>
              </div>
-             <div className="bg-slate-800 px-3 py-1 rounded border border-slate-700 text-xs font-mono text-primary shadow-[0_0_10px_rgba(56,189,248,0.1)]">
-               SIMULATION ACTIVE
+             <div className="bg-slate-800 px-2 py-0.5 rounded border border-slate-700 font-mono text-primary shadow-sm" role="status">
+               LIVE
              </div>
-          </div>
+          </nav>
         </div>
       </header>
 
-      {/* Main Full-Width Container */}
-      <main className="w-full px-4 md:px-8 py-8 grid grid-cols-1 xl:grid-cols-12 gap-8 max-w-[2400px] mx-auto">
+      {/* Main Container - Compact Grid */}
+      <main className="w-full max-w-[1920px] mx-auto px-4 py-4 flex-1 grid grid-cols-1 xl:grid-cols-12 gap-4 lg:gap-6 h-[calc(100vh-3.5rem)] overflow-y-auto xl:overflow-hidden" role="main">
         
         {/* Left Column: Controls & Educational Info */}
-        <div className="xl:col-span-4 lg:col-span-5 space-y-6 flex flex-col order-2 xl:order-1">
+        <section className="xl:col-span-4 lg:col-span-5 flex flex-col gap-4 order-2 xl:order-1 xl:h-full min-h-0" aria-label="Controls and Information">
           
           {/* Controls Card */}
-          <div className="bg-surface border border-slate-700 rounded-xl p-6 shadow-xl">
-             <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold text-slate-200">Handshake Timeline</h2>
-                <span className="text-xs font-mono text-slate-500 bg-slate-800 px-2 py-1 rounded">Step {currentStepIndex + 1} / {STEPS_SEQUENCE.length}</span>
+          <div className="bg-surface border border-slate-700 rounded-xl p-4 shadow-lg flex-none">
+             <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-semibold text-slate-200">Simulation Timeline</h2>
+                <span className="text-[10px] font-mono text-slate-400 bg-slate-800 px-1.5 py-0.5 rounded">Step {currentStepIndex + 1}/{STEPS_SEQUENCE.length}</span>
              </div>
-             <div className="h-2 bg-slate-800 rounded-full overflow-hidden mb-6">
+             {/* Progress Bar */}
+             <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden mb-4" role="progressbar" aria-valuenow={((currentStepIndex + 1) / STEPS_SEQUENCE.length) * 100} aria-valuemin={0} aria-valuemax={100} aria-label="Progress">
                 <div 
                   className="h-full bg-gradient-to-r from-primary via-secondary to-accent transition-all duration-500 ease-out"
                   style={{ width: `${((currentStepIndex + 1) / STEPS_SEQUENCE.length) * 100}%` }}
                 ></div>
              </div>
+             {/* Buttons */}
              <div className="grid grid-cols-5 gap-2">
-                <button onClick={handlePrev} disabled={currentStepIndex === 0}
-                  className="col-span-1 py-3 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex justify-center">
-                  <ArrowLeft size={20} />
+                <button onClick={handlePrev} disabled={currentStepIndex === 0} aria-label="Previous Step"
+                  className="col-span-1 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex justify-center focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none">
+                  <ArrowLeft size={18} />
                 </button>
-                <button onClick={togglePlay} 
-                  className="col-span-2 bg-primary hover:bg-sky-400 text-slate-900 font-bold py-3 rounded-lg transition-colors flex items-center justify-center gap-2 shadow-lg shadow-primary/10">
+                <button onClick={togglePlay} aria-label={isPlaying ? "Pause Simulation" : "Start Simulation"}
+                  className={`col-span-2 font-bold py-2 rounded-lg transition-colors flex items-center justify-center gap-2 shadow-lg focus-visible:ring-2 focus-visible:ring-white focus-visible:outline-none ${
+                    isPlaying 
+                    ? 'bg-amber-500 hover:bg-amber-400 text-slate-900' 
+                    : 'bg-primary hover:bg-sky-400 text-slate-900 shadow-primary/10'
+                  }`}>
                    {isPlaying ? (
-                     <><span>PAUSE</span></>
+                     <><Pause size={16} fill="currentColor" /> <span>PAUSE</span></>
                    ) : (
-                     <><Play size={18} fill="currentColor" /> <span>{currentStepIndex === STEPS_SEQUENCE.length - 1 ? 'REPLAY' : 'START'}</span></>
+                     <><Play size={16} fill="currentColor" /> <span>{currentStepIndex === STEPS_SEQUENCE.length - 1 ? 'REPLAY' : 'START'}</span></>
                    )}
                 </button>
-                <button onClick={handleNext} disabled={currentStepIndex === STEPS_SEQUENCE.length - 1}
-                  className="col-span-1 py-3 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex justify-center">
-                  <ArrowRight size={20} />
+                <button onClick={handleNext} disabled={currentStepIndex === STEPS_SEQUENCE.length - 1} aria-label="Next Step"
+                  className="col-span-1 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex justify-center focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none">
+                  <ArrowRight size={18} />
                 </button>
-                <button onClick={handleReset}
-                  className="col-span-1 py-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors flex justify-center">
-                  <RefreshCw size={20} />
+                <button onClick={handleReset} aria-label="Reset Simulation"
+                  className="col-span-1 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors flex justify-center focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none">
+                  <RefreshCw size={18} />
                 </button>
              </div>
           </div>
 
           {/* Detailed Info Card */}
-          <div className="bg-surface border border-slate-700 rounded-xl p-6 md:p-8 relative overflow-hidden flex-1 shadow-xl flex flex-col">
-            <div className="absolute -top-6 -right-6 text-slate-800/50 pointer-events-none">
-              <Lock size={240} />
+          <article className="bg-surface border border-slate-700 rounded-xl relative overflow-hidden flex-1 shadow-lg flex flex-col min-h-0">
+            <div className="absolute -top-6 -right-6 text-slate-800/50 pointer-events-none" aria-hidden="true">
+              <Lock size={200} />
             </div>
             
-            <div className="relative z-10 space-y-6">
-              <div>
-                <h2 className="text-3xl font-bold text-white mb-4 leading-tight">{stepInfo.title}</h2>
-                <p className="text-slate-300 leading-relaxed text-lg">{stepInfo.description}</p>
+            <div className="relative z-10 flex flex-col h-full">
+              <div className="p-4 border-b border-slate-700/50 bg-slate-900/30 flex-none">
+                <h2 className="text-lg font-bold text-white mb-1.5 leading-tight">{stepInfo.title}</h2>
+                <p className="text-slate-300 text-sm leading-relaxed">{stepInfo.description}</p>
               </div>
               
-              <div className="space-y-4">
+              <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
                 {/* Analogy Section */}
-                <div className="bg-indigo-950/40 rounded-lg p-5 border border-indigo-500/20 backdrop-blur-sm">
-                  <div className="flex items-center gap-2 mb-2">
-                    <BookOpen size={16} className="text-indigo-400" />
-                    <h4 className="text-xs font-bold text-indigo-400 uppercase tracking-wider">Real World Analogy</h4>
+                <div className="bg-indigo-950/40 rounded-lg p-3 border border-indigo-500/20">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <BookOpen size={14} className="text-indigo-300" />
+                    <h4 className="text-[10px] font-bold text-indigo-300 uppercase tracking-wider">Analogy</h4>
                   </div>
-                  <p className="text-indigo-100/90 italic text-sm leading-relaxed">"{stepInfo.analogy}"</p>
+                  <p className="text-indigo-100 italic text-sm leading-relaxed">"{stepInfo.analogy}"</p>
                 </div>
 
                  {/* Why It Matters Section */}
-                <div className="bg-emerald-950/40 rounded-lg p-5 border border-emerald-500/20 backdrop-blur-sm">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Info size={16} className="text-emerald-400" />
-                    <h4 className="text-xs font-bold text-emerald-400 uppercase tracking-wider">Why It Matters</h4>
+                <div className="bg-emerald-950/40 rounded-lg p-3 border border-emerald-500/20">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <Info size={14} className="text-emerald-300" />
+                    <h4 className="text-[10px] font-bold text-emerald-300 uppercase tracking-wider">Why It Matters</h4>
                   </div>
-                  <p className="text-emerald-100/90 text-sm leading-relaxed">{stepInfo.whyItMatters}</p>
+                  <p className="text-emerald-50 text-sm leading-relaxed">{stepInfo.whyItMatters}</p>
                 </div>
 
                 {/* Technical Breakdown */}
-                <div className="bg-slate-900/80 rounded-lg p-5 border border-slate-800 backdrop-blur-sm">
-                   <h4 className="text-xs font-bold text-primary uppercase mb-3 tracking-wider">Technical Breakdown</h4>
-                   <ul className="space-y-3">
+                <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-800">
+                   <h4 className="text-[10px] font-bold text-slate-400 uppercase mb-2 tracking-wider">Technical Specs</h4>
+                   <ul className="space-y-1.5">
                      {stepInfo.technicalDetails.map((detail, idx) => (
-                       <li key={idx} className="text-sm text-slate-400 font-mono flex items-start gap-3">
-                         <span className="text-primary mt-1 text-lg leading-none">›</span>
+                       <li key={idx} className="text-xs text-slate-300 font-mono flex items-start gap-2">
+                         <span className="text-primary mt-0.5 text-sm" aria-hidden="true">›</span>
                          <span className="leading-snug">{detail}</span>
                        </li>
                      ))}
@@ -327,64 +333,69 @@ const App: React.FC = () => {
                 </div>
               </div>
             </div>
-          </div>
+          </article>
 
-        </div>
+        </section>
 
-        {/* Right Column: Wide Visualization */}
-        <div className="xl:col-span-8 lg:col-span-7 flex flex-col gap-6 order-1 xl:order-2">
-           <SimulationStage currentState={simulationState} />
+        {/* Right Column: Visualization & Logs */}
+        <section className="xl:col-span-8 lg:col-span-7 flex flex-col gap-4 order-1 xl:order-2 xl:h-full min-h-0" aria-label="Visual Simulation and Logs">
+           
+           {/* Stage - Compact Height */}
+           <div className="flex-none">
+             <SimulationStage currentState={simulationState} />
+           </div>
 
-           {/* AI & Logs Section */}
-           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 h-[400px] xl:h-[320px]">
+           {/* Bottom Grid */}
+           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1 min-h-[250px] max-h-[300px]">
               
               {/* AI Insights */}
-              <div className="bg-gradient-to-br from-indigo-950/50 to-purple-950/50 border border-indigo-500/20 rounded-xl p-6 flex flex-col shadow-lg">
-                <div className="flex items-center justify-between mb-4">
+              <div className="bg-gradient-to-br from-indigo-950/50 to-purple-950/50 border border-indigo-500/20 rounded-xl p-4 flex flex-col shadow-lg overflow-hidden">
+                <div className="flex items-center justify-between mb-3 flex-none">
                   <div className="flex items-center gap-2">
-                      <div className="bg-indigo-500 p-1.5 rounded text-white shadow-lg shadow-indigo-500/20">
-                        <MessageSquare size={16}/>
+                      <div className="bg-indigo-500 p-1 rounded text-white shadow-lg shadow-indigo-500/20">
+                        <MessageSquare size={14}/>
                       </div>
-                      <h3 className="font-semibold text-indigo-200">Gemini Network Analyst</h3>
+                      <h3 className="font-semibold text-indigo-100 text-sm">Gemini Analyst</h3>
                   </div>
-                  <div className="text-[10px] text-indigo-400 font-mono border border-indigo-500/30 px-2 py-0.5 rounded">AI POWERED</div>
+                  <div className="text-[9px] text-indigo-300 font-mono border border-indigo-500/30 px-1.5 py-0.5 rounded">AI POWERED</div>
                 </div>
                 
-                <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar text-sm text-indigo-100/90 leading-relaxed font-light">
+                <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar text-xs text-indigo-50 leading-relaxed font-light">
                    {aiTip}
                 </div>
                 
                 <button 
                     onClick={() => setChatOpen(true)}
-                    className="mt-4 w-full py-2.5 text-xs font-bold uppercase tracking-wide text-indigo-300 hover:text-white bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 rounded-lg transition-all"
+                    aria-label="Ask AI Assistant a question"
+                    className="mt-3 w-full py-2 text-xs font-bold uppercase tracking-wide text-indigo-200 hover:text-white bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/40 rounded-lg transition-all focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:outline-none"
                 >
-                  Ask Gemini a Question
+                  Ask Question
                 </button>
               </div>
 
               {/* Packet Log */}
-              <div className="bg-black/80 rounded-xl border border-slate-800 p-4 font-mono text-xs overflow-hidden flex flex-col shadow-lg">
-                  <div className="flex items-center gap-2 border-b border-slate-800 pb-2 mb-2">
-                    <div className="flex gap-1.5">
-                        <div className="w-2.5 h-2.5 rounded-full bg-red-500/80"></div>
-                        <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/80"></div>
-                        <div className="w-2.5 h-2.5 rounded-full bg-green-500/80"></div>
+              <div className="bg-black/90 rounded-xl border border-slate-800 p-4 font-mono text-xs overflow-hidden flex flex-col shadow-lg" role="log" aria-live="polite" aria-label="Packet Capture Log">
+                  <div className="flex items-center gap-2 border-b border-slate-800 pb-2 mb-2 flex-none">
+                    <div className="flex gap-1.5" aria-hidden="true">
+                        <div className="w-2 h-2 rounded-full bg-red-500/80"></div>
+                        <div className="w-2 h-2 rounded-full bg-yellow-500/80"></div>
+                        <div className="w-2 h-2 rounded-full bg-green-500/80"></div>
                     </div>
-                    <span className="text-slate-500 ml-2 uppercase tracking-wider">Live Packet Capture</span>
+                    <span className="text-slate-400 ml-2 uppercase tracking-wider text-[10px]">Packet Capture (Wireshark)</span>
                   </div>
-                  <div className="flex-1 overflow-y-auto space-y-1.5 text-slate-300 custom-scrollbar p-2">
+                  <div className="flex-1 overflow-y-auto space-y-1 text-slate-300 custom-scrollbar p-1">
                     {STEPS_SEQUENCE.slice(0, currentStepIndex + 1).map((step, idx) => {
                         const info = STEP_DETAILS[step];
                         if(step === TlsStep.IDLE) return null;
                         return (
-                          <div key={idx} className="flex gap-3 hover:bg-white/5 p-1 rounded transition-colors group">
-                            <span className="text-slate-600 w-16 text-right select-none">00:0{idx}.{idx*155}</span>
-                            <span className={`flex-1 font-medium ${
+                          <div key={idx} className="flex gap-2 hover:bg-white/5 p-1 rounded transition-colors group items-start">
+                            <span className="text-slate-500 w-12 text-right select-none text-[10px] mt-0.5">0.{idx}s</span>
+                            <span className={`flex-1 break-words font-medium ${
                               step === TlsStep.SECURE_TUNNEL ? 'text-emerald-400' : 
                               step === TlsStep.KEY_DERIVATION ? 'text-yellow-400' : 
                               info.direction === 'right' ? 'text-blue-400' : 'text-purple-400'
                             }`}>
-                              <span className="mr-2 text-slate-600 group-hover:text-slate-400">
+                              <span className="mr-1.5 text-slate-500 group-hover:text-slate-300 font-bold" aria-hidden="true">
                                 {info.direction === 'right' ? '→' : info.direction === 'left' ? '←' : '•'}
                               </span>
                               {info.packetName}
@@ -392,42 +403,41 @@ const App: React.FC = () => {
                           </div>
                         )
                     })}
-                    {currentStepIndex === 0 && <span className="text-slate-700 italic px-2">Listening on port 443...</span>}
+                    <div ref={logsEndRef} />
+                    {currentStepIndex === 0 && <span className="text-slate-500 italic px-2">Listening on port 443...</span>}
                   </div>
               </div>
 
            </div>
-        </div>
+        </section>
 
       </main>
 
       {/* Chat Overlay */}
       {chatOpen && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-6">
-           <div className="bg-surface w-full max-w-2xl rounded-2xl shadow-2xl border border-slate-700 flex flex-col max-h-[85vh] animate-pulse-slow">
-              <div className="p-5 border-b border-slate-700 flex justify-between items-center bg-slate-900/50 rounded-t-2xl">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="chat-title">
+           <div className="bg-surface w-full max-w-2xl rounded-2xl shadow-2xl border border-slate-700 flex flex-col max-h-[80vh]">
+              <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-900/50 rounded-t-2xl">
                  <div className="flex items-center gap-3">
                    <div className="bg-primary rounded p-1">
-                     <MessageSquare size={18} className="text-slate-900"/>
+                     <MessageSquare size={16} className="text-slate-900"/>
                    </div>
                    <div>
-                     <h3 className="font-bold text-white">TLS Expert Assistant</h3>
-                     <p className="text-xs text-slate-400">Ask about cryptographic primitives, handshakes, or security vulnerabilities.</p>
+                     <h3 id="chat-title" className="font-bold text-white text-sm">TLS Expert Assistant</h3>
                    </div>
                  </div>
-                 <button onClick={() => setChatOpen(false)} className="text-slate-400 hover:text-white p-2 hover:bg-slate-800 rounded-full transition-colors">&times;</button>
+                 <button onClick={() => setChatOpen(false)} aria-label="Close Chat" className="text-slate-400 hover:text-white p-1.5 hover:bg-slate-800 rounded-full transition-colors focus-visible:ring-2 focus-visible:ring-primary">&times;</button>
               </div>
-              <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-950/50 min-h-[400px]">
+              <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-950/50 min-h-[300px]">
                  {chatHistory.length === 0 && (
-                   <div className="text-center text-slate-500 mt-20">
-                      <ShieldCheck size={48} className="mx-auto mb-4 opacity-20" />
-                      <p className="text-lg font-medium text-slate-400">Ready to assist.</p>
-                      <p className="text-sm mt-2">Try asking: "What happens if the certificate is expired?"</p>
+                   <div className="text-center text-slate-500 mt-12">
+                      <ShieldCheck size={40} className="mx-auto mb-3 opacity-20" />
+                      <p className="text-base font-medium text-slate-400">Ready to assist.</p>
                    </div>
                  )}
                  {chatHistory.map((msg, i) => (
                     <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                       <div className={`max-w-[85%] rounded-2xl px-5 py-3 text-sm leading-relaxed shadow-lg ${
+                       <div className={`max-w-[85%] rounded-2xl px-4 py-2 text-sm leading-relaxed shadow-lg ${
                          msg.role === 'user' 
                            ? 'bg-primary text-slate-900 rounded-br-none' 
                            : 'bg-slate-800 text-slate-200 border border-slate-700 rounded-bl-none'
@@ -438,23 +448,25 @@ const App: React.FC = () => {
                  ))}
                  {isLoading && (
                    <div className="flex justify-start">
-                      <div className="bg-slate-800 rounded-2xl px-5 py-3 text-sm text-slate-400 animate-pulse flex items-center gap-2 rounded-bl-none">
-                         <div className="w-2 h-2 bg-slate-500 rounded-full animate-bounce"></div>
-                         <div className="w-2 h-2 bg-slate-500 rounded-full animate-bounce delay-100"></div>
-                         <div className="w-2 h-2 bg-slate-500 rounded-full animate-bounce delay-200"></div>
+                      <div className="bg-slate-800 rounded-2xl px-4 py-2 text-xs text-slate-400 animate-pulse flex items-center gap-1 rounded-bl-none">
+                         <span>Typing</span>
+                         <div className="w-1 h-1 bg-slate-500 rounded-full animate-bounce"></div>
+                         <div className="w-1 h-1 bg-slate-500 rounded-full animate-bounce delay-100"></div>
+                         <div className="w-1 h-1 bg-slate-500 rounded-full animate-bounce delay-200"></div>
                       </div>
                    </div>
                  )}
               </div>
-              <form onSubmit={handleChatSubmit} className="p-5 border-t border-slate-700 flex gap-3 bg-slate-900/50 rounded-b-2xl">
+              <form onSubmit={handleChatSubmit} className="p-4 border-t border-slate-700 flex gap-2 bg-slate-900/50 rounded-b-2xl">
                  <input 
                     type="text" 
                     value={chatInput}
                     onChange={(e) => setChatInput(e.target.value)}
-                    placeholder="E.g., How does Forward Secrecy work?"
-                    className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all placeholder:text-slate-600"
+                    placeholder="Ask about handshake details..."
+                    className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all placeholder:text-slate-600"
+                    aria-label="Chat Input"
                  />
-                 <button type="submit" disabled={isLoading} className="bg-primary hover:bg-sky-400 text-slate-900 font-bold px-6 py-2 rounded-lg transition-colors shadow-lg shadow-primary/20">
+                 <button type="submit" disabled={isLoading} className="bg-primary hover:bg-sky-400 text-slate-900 font-bold px-4 py-2 rounded-lg transition-colors text-sm focus-visible:ring-2 focus-visible:ring-white">
                     Send
                  </button>
               </form>

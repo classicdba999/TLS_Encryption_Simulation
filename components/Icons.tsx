@@ -1,3 +1,4 @@
+
 import { 
   ShieldCheck, 
   Lock, 
@@ -10,6 +11,7 @@ import {
   ArrowLeft,
   RefreshCw,
   Play,
+  Pause,
   SkipForward,
   HelpCircle,
   MessageSquare,
@@ -31,6 +33,7 @@ export {
   ArrowLeft,
   RefreshCw, 
   Play,
+  Pause,
   SkipForward,
   HelpCircle,
   MessageSquare,
