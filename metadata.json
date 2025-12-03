@@ -1,0 +1,5 @@
+{
+  "name": "TLS 1.3 Masterclass & Simulator",
+  "description": "A comprehensive, interactive simulation of the TLS 1.3 handshake protocol with real-world use case visualizations, powered by Gemini for deep-dive explanations.",
+  "requestFramePermissions": []
+}
